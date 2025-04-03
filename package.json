@@ -1,6 +1,6 @@
 {
-    "name": "vscode-clangd",
-    "displayName": "clangd",
+    "name": "vscode-clangd-chuck",
+    "displayName": "clangd-chuck",
     "description": "C/C++ completion, navigation, and insights",
     "version": "0.1.33",
     "publisher": "llvm-vs-code-extensions",
