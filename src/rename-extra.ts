@@ -6,9 +6,23 @@ export function activate(context: ClangdContext) {
   context.subscriptions.push(feature);
 }
 
+export function raw(a: TemplateStringsArray, ...values: any[]): string {
+  var len = a.length - 1;
+  var outstr = a[0];
+  for (var i = 0; i < len; i++) {
+    outstr += values[i] + a[i + 1];
+  }
+  //console.log("raw", { a, values, outstr });
+  return outstr;
+}
+
+export function html(a: TemplateStringsArray, ...values: any[]) {
+  return raw(a, ...values);
+}
+
 interface RenameData {
-  oldName?: string;
-  newName?: string;
+  oldName: string;
+  newName: string;
   references?: FileRefGroup[];
 }
 
@@ -26,7 +40,7 @@ interface ReferenceItem {
 
 export class EnhancedRenameFeature implements vscode.Disposable {
   private context: ClangdContext;
-  private renameData: RenameData = {};
+  private renameData: RenameData = { oldName: "", newName: "" };
   private panel?: vscode.WebviewPanel;
 
   constructor(context: ClangdContext) {
@@ -249,164 +263,288 @@ export class EnhancedRenameFeature implements vscode.Disposable {
     oldName: string,
     newName: string
   ): string {
-    return `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <style>
-                    ${this.getStyles()}
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <h3>Renaming "${oldName}" to "${newName}"</h3>
-                </div>
-                
-                <div class="references-container">
-                    ${groups
-                      .map((group) => this.renderFileGroup(group))
-                      .join("")}
-                </div>
+    return html`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8" />
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+          />
 
-                <div class="actions">
-                    <button class="apply-button" onclick="handleApply()">Apply Rename (${this.countSelected(
-                      groups
-                    )})</button>
-                    <button class="cancel-button" onclick="handleCancel()">Cancel</button>
-                </div>
+          ${this.getStyles()}
+        </head>
+        <body>
+          <div class="header">
+            <h3>Renaming "${oldName}" to "${newName}"</h3>
+          </div>
 
-                <script>
-                    const vscode = acquireVsCodeApi();
-                    let selectedLocations = ${JSON.stringify(
-                      this.getInitialSelections(groups)
-                    )};
+          <div class="references-container">
+            ${groups.map((group) => this.renderFileGroup(group)).join("")}
+          </div>
 
-                    function updateSelections() {
-                        selectedLocations = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
-                            .map(checkbox => checkbox.dataset.location);
-                        
-                        document.querySelector('.apply-button').textContent = 
-                            \`Apply Rename (\${selectedLocations.length})\`;
-                    }
+          <div class="actions">
+            <button class="apply-button" onclick="handleApply()">
+              Apply Rename (${this.countSelected(groups)})
+            </button>
+            <button class="cancel-button" onclick="handleCancel()">
+              Cancel
+            </button>
+          </div>
 
-                    function handleApply() {
-                      const locations = Array.from(document.querySelectorAll('input:checked'))
-                        .map(checkbox => {
-                          const encoded = checkbox.dataset.location;
-                          return decodeURIComponent(encoded);
-                        });
-                      
-                      vscode.postMessage({ command: 'apply', locations });
-                    }
+          <script>
+            const vscode = acquireVsCodeApi();
+            let selectedLocations = ${JSON.stringify(
+              this.getInitialSelections(groups)
+            )};
 
+            function previewLocationWebview(locationJson) {
+              vscode.postMessage({
+                command: "previewLocation",
+                location: decodeURIComponent(locationJson),
+              });
+            }
 
+            function toggleFold(header) {
+              const section = header.parentElement;
+              section.classList.toggle("unfolded");
+              const container = section.querySelector(".locations-container");
+              container.style.display =
+                container.style.display === "none" ? "block" : "none";
+            }
 
-                    function handleCancel() {
-                        vscode.postMessage({ command: 'cancel' });
-                    }
+            function updateSelections() {
+              selectedLocations = Array.from(
+                document.querySelectorAll('input[type="checkbox"]:checked')
+              ).map((checkbox) => checkbox.dataset.location);
 
-                    document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-                        checkbox.addEventListener('change', updateSelections);
-                    });
-                </script>
-            </body>
-            </html>
-        `;
+              document.querySelector(".apply-button").textContent =
+                "Apply Rename (" + selectedLocations.length + ")";
+            }
+
+            function handleApply() {
+              const locations = Array.from(
+                document.querySelectorAll("input:checked")
+              ).map((checkbox) => {
+                const encoded = checkbox.dataset.location;
+                return decodeURIComponent(encoded);
+              });
+
+              vscode.postMessage({ command: "apply", locations });
+            }
+
+            function handleCancel() {
+              vscode.postMessage({ command: "cancel" });
+            }
+
+            document
+              .querySelectorAll('input[type="checkbox"]')
+              .forEach((checkbox) => {
+                checkbox.addEventListener("change", updateSelections);
+              });
+          </script>
+        </body>
+      </html>
+    `;
   }
 
   private getStyles(): string {
-    return `
-            body {
-                font-family: var(--vscode-font-family);
-                padding: 0 20px;
-                background-color: var(--vscode-editor-background);
-                color: var(--vscode-editor-foreground);
-            }
+    return html`<style>
+      body {
+        font-family: var(--vscode-font-family);
+        padding: 0 20px;
+        background-color: var(--vscode-editor-background);
+        color: var(--vscode-editor-foreground);
+      }
+      .locations-container {
+        margin-left: 20px;
+        display: block;
+      }
+      .file-section.unfolded .locations-container {
+        display: block;
+      }
 
-            .header {
-                border-bottom: 1px solid var(--vscode-editorWidget-border);
-                padding: 10px 0;
-                margin-bottom: 15px;
-            }
+      .fold-icon {
+        margin-right: 8px;
+        transition: transform 0.2s;
+      }
 
-            .file-group {
-                margin: 15px 0;
-                border: 1px solid var(--vscode-editorWidget-border);
-                border-radius: 3px;
-            }
+      .file-section.unfolded .fold-icon {
+        transform: rotate(90deg);
+      }
 
-            .file-header {
-                padding: 8px 15px;
-                background-color: var(--vscode-editorWidget-background);
-                font-weight: bold;
-            }
+      .location-item {
+        display: flex;
+        align-items: center;
+        padding: 0px 0;
+        /* border-block: initial; */
+        border: var(--vscode-editorWidget-border);
+        border-width: 1px;
+        border-style: groove;
+        padding: 0px;
+      }
 
-            .reference-item {
-                padding: 8px 15px;
-                display: flex;
-                align-items: center;
-                border-top: 1px solid var(--vscode-editorWidget-border);
-            }
+      .goto-button {
+        margin-left: auto;
+        background: none;
+        border: 1px solid currentColor;
+        cursor: pointer;
+        color: var(--vscode-notificationLink-foreground);
+        padding: 2px;
+      }
 
-            .reference-preview {
-                flex: 1;
-                margin-left: 10px;
-                font-family: var(--vscode-editor-font-family);
-            }
+      .preview {
+        flex: 1;
+        margin: 0 10px;
+      }
 
-            .actions {
-                margin-top: 20px;
-                text-align: right;
-            }
+      u {
+        text-decoration: underline;
+        color: var(--vscode-editor-foreground);
+      }
 
-            button {
-                padding: 8px 16px;
-                margin-left: 10px;
-                border: none;
-                border-radius: 3px;
-                cursor: pointer;
-            }
+      .header {
+        border-bottom: 1px solid var(--vscode-editorWidget-border);
+        padding: 10px 0;
+        margin-bottom: 15px;
+      }
 
-            .apply-button {
-                background-color: var(--vscode-button-background);
-                color: var(--vscode-button-foreground);
-            }
+      .file-group {
+        margin: 3px 0;
+        border: 1px solid var(--vscode-editorWidget-border);
+        border-radius: 0px;
+      }
 
-            .cancel-button {
-                background-color: var(--vscode-input-background);
-                color: var(--vscode-input-foreground);
-            }
-        `;
+      .file-header {
+        cursor: pointer;
+        padding: 2px;
+        background: var(--vscode-editorWidget-border);
+        display: flex;
+        align-items: center;
+      }
+
+      .reference-item {
+        padding: 8px 15px;
+        display: flex;
+        align-items: center;
+        border-top: 1px solid var(--vscode-editorWidget-border);
+      }
+
+      .reference-preview {
+        flex: 1;
+        margin-left: 10px;
+        font-family: var(--vscode-editor-font-family);
+      }
+
+      .actions {
+        margin-top: 20px;
+        text-align: right;
+      }
+
+      button {
+        padding: 8px 16px;
+        margin-left: 10px;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+
+      .apply-button {
+        background-color: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+      }
+
+      .cancel-button {
+        background-color: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+      }
+    </style> `;
   }
 
   private renderFileGroup(group: FileRefGroup): string {
-    return `
-            <div class="file-group">
-                <div class="file-header">
-                    📄 ${group.file}
-                </div>
-                ${group.refs
-                  .map((ref) => this.renderReferenceItem(ref))
-                  .join("")}
-            </div>
-        `;
+    return html`
+      <div class="file-group">
+        <div class="file-section">
+          <div class="file-header" onclick="toggleFold(this)">
+            <span class="fold-icon">▶</span>
+            <span class="filename">${group.file}</span>
+            <span class="count">(${group.refs.length}处)</span>
+          </div>
+          <div class="locations-container">
+            ${group.refs.map((ref) => this.renderReferenceItem(ref)).join("")}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private highlightChanges(text: any, term: any) {
+    return text.replace(new RegExp(term, "g"), "<u>$&</u>");
+  }
+
+  /**
+   * 预览指定位置（在编辑器中打开并滚动到目标位置）
+   * @param location 要预览的vscode.Location对象
+   */
+  private async previewLocation(locationJson: string) {
+    try {
+      const location = this.parseLocation(locationJson);
+      if (location == null) return;
+
+      // 打开文档并滚动到指定位置
+      const document = await vscode.workspace.openTextDocument(location.uri);
+      const editor = await vscode.window.showTextDocument(document, {
+        selection: location.range, // 定位到指定范围
+        preserveFocus: true, // 保持当前焦点（不切换编辑器）
+        preview: true, // 在预览模式打开（可复用现有标签页）
+      });
+
+      // 可选：添加可视化高亮（例如装饰器）
+      const decorationType = vscode.window.createTextEditorDecorationType({
+        backgroundColor: new vscode.ThemeColor(
+          "editor.selectionHighlightBackground"
+        ),
+        isWholeLine: true,
+      });
+      editor.setDecorations(decorationType, [location.range]);
+
+      // 3秒后清除装饰器
+      setTimeout(() => {
+        decorationType.dispose();
+      }, 3000);
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `无法预览位置: ${error instanceof Error ? error.message : error}`
+      );
+    }
+  }
+  private toSaveLocationString(location: vscode.Location) {
+    return encodeURIComponent(JSON.stringify(this.serializeLocation(location)));
   }
 
   private renderReferenceItem(ref: ReferenceItem): string {
     // 修复1: 完整的HTML结构
-    const safeLocation = encodeURIComponent(
-      JSON.stringify(this.serializeLocation(ref.location))
-    );
-    return `
-      <label class="reference-item">
-        <input type="checkbox" 
-          ${ref.selected ? "checked" : ""}
+    const safeLocation = this.toSaveLocationString(ref.location);
+    return html`
+      <div class="location-item">
+        <input
+          type="checkbox"
           data-location="${safeLocation}"
+          ${ref.selected ? "checked" : ""}
+        />
+        <div class="preview">
+          <span class="old"
+            >${this.highlightChanges(ref.codePreview, this.renameData.oldName)}
+          </span>
+        </div>
+        <button
+          class="goto-button"
+          onclick="previewLocationWebview('${safeLocation}')"
         >
-        <span class="reference-preview">${ref.codePreview}</span>
-      </label>
+          ↗
+        </button>
+      </div>
     `;
   }
 
@@ -424,6 +562,8 @@ export class EnhancedRenameFeature implements vscode.Disposable {
         case "cancel":
           this.disposePanel();
           break;
+        case "previewLocation":
+          this.previewLocation(message.location);
       }
     });
   }
